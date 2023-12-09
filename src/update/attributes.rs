@@ -8,6 +8,22 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::*;
 
+// https://stackoverflow.com/questions/30320083/how-to-print-a-vec
+fn vec_to_str<I, D, S>(iterable: I, separator: S) -> String
+where
+    I: IntoIterator<Item = D>,
+    D: Display,
+    S: Display,
+{
+    let mut iterator = iterable.into_iter();
+    let head = match iterator.next() {
+        None => return String::from(""),
+        Some(x) => format!("{}", x),
+    };
+    let body = iterator.fold(head, |a, v| format!("{}{}{}", a, separator, v));
+    format!("{}", body)
+}
+
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 #[allow(missing_docs)]
@@ -43,7 +59,13 @@ pub enum Identifier {
     BGP_LS = 29,
     LARGE_COMMUNITY = 32,
     BGPSEC_PATH = 33,
-    BGP_PREFIX_SID = 34,
+    BGP_COMMUNITY_CONTAINER = 34,
+    ONLY_TO_CUSTOMER = 35,
+    BGP_DOMAIN_PATH = 36,
+    SFP = 37,
+    BFD_DISCRIMINATOR = 38,
+    NEXT_HOP_CAPABILITIES = 39,
+    BGP_PREFIX_SID = 40,
     ATTR_SET = 128,
 }
 
@@ -150,7 +172,25 @@ pub enum PathAttribute {
     /// Defined in [RFC8205](http://www.iana.org/go/rfc8205).
     BGPSEC_PATH,
 
-    /// Defined [here](http://www.iana.org/go/draft-ietf-idr-bgp-prefix-sid-27).
+    /// https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml
+    BGP_COMMUNITY_CONTAINER,
+
+    /// https://www.rfc-editor.org/rfc/rfc9234.html
+    ONLY_TO_CUSTOMER(Vec<(u8, u8, u8, u8)>),
+
+    /// https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml
+    BGP_DOMAIN_PATH,
+
+    /// https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml
+    SFP,
+
+    /// https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml
+    BFD_DISCRIMINATOR,
+
+    /// https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml
+    NEXT_HOP_CAPABILITIES,
+
+    /// https://www.iana.org/assignments/bgp-parameters/bgp-parameters.xhtml
     BGP_PREFIX_SID,
 
     /// Defined in [RFC6368](http://www.iana.org/go/rfc6368).
@@ -390,6 +430,14 @@ impl PathAttribute {
 
                 Ok(PathAttribute::LARGE_COMMUNITY(communities))
             }
+            35 => {
+                let p1 = stream.read_u8()?;
+                let p2 = stream.read_u8()?;
+                let p3 = stream.read_u8()?;
+                let p4 = stream.read_u8()?;
+                let to_cus: Vec<(u8,u8,u8,u8)> = vec![(p1,p2,p3,p4)];
+                Ok(PathAttribute::ONLY_TO_CUSTOMER(to_cus))
+            }
             128 => {
                 let asn = stream.read_u32::<BigEndian>()?;
 
@@ -457,6 +505,12 @@ impl PathAttribute {
             PathAttribute::BGP_LS => Identifier::BGP_LS,
             PathAttribute::LARGE_COMMUNITY(_) => Identifier::LARGE_COMMUNITY,
             PathAttribute::BGPSEC_PATH => Identifier::BGPSEC_PATH,
+            PathAttribute::BGP_COMMUNITY_CONTAINER => Identifier::BGP_COMMUNITY_CONTAINER,
+            PathAttribute::ONLY_TO_CUSTOMER(_) => Identifier::ONLY_TO_CUSTOMER,
+            PathAttribute::BGP_DOMAIN_PATH => Identifier::BGP_DOMAIN_PATH,
+            PathAttribute::SFP => Identifier::SFP,
+            PathAttribute::BFD_DISCRIMINATOR => Identifier::BFD_DISCRIMINATOR,
+            PathAttribute::NEXT_HOP_CAPABILITIES => Identifier::NEXT_HOP_CAPABILITIES,
             PathAttribute::BGP_PREFIX_SID => Identifier::BGP_PREFIX_SID,
             PathAttribute::ATTR_SET(_) => Identifier::ATTR_SET,
         }
@@ -553,6 +607,72 @@ impl PathAttribute {
         }
         buf.write_all(&bytes)
     }
+}
+
+impl Display for PathAttribute {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+       match self {
+        PathAttribute::ORIGIN(origin) => write!(f,"ORIGIN: {}", origin),
+        PathAttribute::AS_PATH(asp) => write!(f,"AS_PATH: {}", asp),
+        PathAttribute::NEXT_HOP(ip) => write!(f,"NEXT_HOP: {}", ip),
+        PathAttribute::MULTI_EXIT_DISC(med) => write!(f,"MULTI_EXIT_DISC: {}", med),
+        PathAttribute::LOCAL_PREF(prev) => write!(f,"LOCAL_PREF: {}", prev),
+        PathAttribute::ATOMIC_AGGREGATOR => write!(f,"ATOMIC_AGGREGATOR"),
+        PathAttribute::AGGREGATOR((id, ip)) => write!(f,"AGGREGATOR: {} {}", id, ip),
+        PathAttribute::COMMUNITY(comm) => {
+            let comms = vec_to_str(comm, " ")
+                .split(" ")
+                .map(|x| {
+                    let mut s = String::from(x);
+                    if s.len() > 3 {
+                        s.insert_str(4, ":");
+                    }
+                    s
+                })
+                .collect::<Vec<String>>()
+                .join(" ");
+            write!(f,"COMMUNITY: {}", comms)
+        },
+        PathAttribute::ORIGINATOR_ID(oid) => write!(f,"ORIGINATOR_ID: {}", oid),
+        PathAttribute::CLUSTER_LIST(lst) => write!(f,"CLUSTER_LIST: {}", vec_to_str(lst, " ")),
+        PathAttribute::DPA((i, v)) => write!(f,"DPA: {} {}",i, v),
+        PathAttribute::ADVERTISER => write!(f,"ADVERTISER"),
+        PathAttribute::CLUSTER_ID => write!(f,"CLUSTER_ID"),
+        PathAttribute::MP_REACH_NLRI(mprn) => write!(f,"MP_REACH_NLRI: {:#?}",mprn),
+        PathAttribute::MP_UNREACH_NLRI(mpun) => write!(f,"MP_UNREACH_NLRI: {:#?}",mpun),
+        PathAttribute::EXTENDED_COMMUNITIES(comm) => write!(f,"EXTENDED_COMMUNITIES: {}", vec_to_str(comm, " ")),
+        PathAttribute::AS4_PATH(asp) => write!(f,"AS4_PATH: {:#?}", asp.segments),
+        PathAttribute::AS4_AGGREGATOR((id, ip)) => write!(f,"AS4_AGGREGATOR: {}, {}", id, ip),
+        PathAttribute::SSA => write!(f,"SSA"),
+        PathAttribute::CONNECTOR(ip) => write!(f,"CONNECTOR:  {}", ip),
+        PathAttribute::AS_PATHLIMIT((id, lim)) => write!(f,"AS_PATHLIMIT: {} {}", id, lim),
+        PathAttribute::PMSI_TUNNEL((id, tid, tun)) => write!(f,"PMSI_TUNNEL: {} {} {}", id, tid, vec_to_str(tun, " ")),
+        PathAttribute::TUNNEL_ENCAPSULATION((id, tun)) => write!(f,"TUNNEL_ENCAPSULATION: {} {}",id, vec_to_str(tun, " ")),
+        PathAttribute::TRAFFIC_ENGINEERING => write!(f,"TRAFFIC_ENGINEERING"),
+        PathAttribute::IPV6_SPECIFIC_EXTENDED_COMMUNITY((i, v, addr, d)) => write!(f,"IPV6_SPECIFIC_EXTENDED_COMMUNITY: {} {} {} {}", i, v, addr, d),
+        PathAttribute::AIGP((id, data)) => write!(f,"AIGP: {} {:?}", id, data),
+        PathAttribute::PE_DISTINGUISHER_LABELS => write!(f,"PE_DISTINGUISHER_LABELS"),
+        PathAttribute::ENTROPY_LABEL_CAPABILITY => write!(f,"ENTROPY_LABEL_CAPABILITY"),
+        PathAttribute::BGP_LS => write!(f,"BGP_LS"),
+        PathAttribute::LARGE_COMMUNITY(comm) => {
+            let comms = comm.into_iter()
+                .map(|x| format!("{}:{}:{}", x.0,x.1,x.2))
+                .collect::<Vec<String>>()
+                .join(" ");
+            write!(f,"LARGE_COMMUNITY: {comms}")
+        }
+        PathAttribute::BGPSEC_PATH => write!(f,"BGPSEC_PATH"),
+        PathAttribute::BGP_COMMUNITY_CONTAINER => write!(f,"BGP_COMMUNITY_CONTAINER"),
+        PathAttribute::ONLY_TO_CUSTOMER(cus) => write!(f,"ONLY_TO_CUSTOMER: {cus:?}"),
+        PathAttribute::BGP_DOMAIN_PATH => write!(f,"BGP_DOMAIN_PATH"),
+        PathAttribute::SFP => write!(f,"SFP"),
+        PathAttribute::BFD_DISCRIMINATOR => write!(f,"BFD_DISCRIMINATOR"),
+        PathAttribute::NEXT_HOP_CAPABILITIES => write!(f,"NEXT_HOP_CAPABILITIES"),
+        PathAttribute::BGP_PREFIX_SID => write!(f,"BGP_PREFIX_SID"),
+        PathAttribute::ATTR_SET((id, aset)) => write!(f,"ATTR_SET: {} {}", id, vec_to_str(aset, " ")),
+
+    }
+}
 }
 
 /// Indicated how an announcement has been generated.
@@ -704,6 +824,11 @@ impl ASPath {
     }
 }
 
+impl Display for ASPath {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", vec_to_str(&self.segments, " "))
+    }
+}
 /// Represents the segment type of an AS_PATH. Can be either AS_SEQUENCE or AS_SET.
 #[derive(Debug, Clone)]
 #[allow(non_camel_case_types)]
@@ -849,6 +974,15 @@ impl Segment {
         }
 
         Ok(segments)
+    }
+}
+
+impl Display for Segment {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+        match self {
+            Segment::AS_SEQUENCE(v) => write!(f,"{}", vec_to_str(v, " ")),
+            Segment::AS_SET(v) => write!(f,"{}", vec_to_str(v, " ")),
+        }
     }
 }
 

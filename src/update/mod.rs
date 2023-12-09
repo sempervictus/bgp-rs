@@ -394,7 +394,8 @@ impl Debug for Prefix {
 }
 
 impl Prefix {
-    fn new(protocol: AFI, length: u8, prefix: Vec<u8>) -> Self {
+    /// Create a new Prefix from AFI, length, and byte vector
+    pub fn new(protocol: AFI, length: u8, prefix: Vec<u8>) -> Self {
         Self {
             protocol,
             length,
@@ -412,7 +413,8 @@ impl Prefix {
         &self.prefix[..self.octet_length()]
     }
 
-    fn parse(stream: &mut impl Read, protocol: AFI) -> Result<Prefix, Error> {
+    /// Create a new prefix from byte steam and AFI
+    pub fn parse(stream: &mut impl Read, protocol: AFI) -> Result<Prefix, Error> {
         let length = stream.read_u8()?;
 
         if length
